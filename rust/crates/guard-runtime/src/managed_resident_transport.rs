@@ -48,15 +48,26 @@ pub(super) fn serve_unix_managed(
     listener
         .set_nonblocking(true)
         .map_err(|_| "native_socket_nonblocking_failed".to_owned())?;
-    let published = publish_state(
-        scope,
-        generation,
-        owner_process_id,
-        digest,
-        "unix",
-        path.to_string_lossy().into_owned(),
-        &token,
+    let published = crate::resident_diagnostics::observe_value(
+        crate::resident_diagnostics::Phase::DiagPublishState,
+        || {
+            publish_state(
+                scope,
+                generation,
+                owner_process_id,
+                digest,
+                "unix",
+                path.to_string_lossy().into_owned(),
+                &token,
+            )
+        },
     )?;
+    if let Some(started) = crate::resident_diagnostics::DIAG_SERVE_STARTED.get() {
+        crate::resident_diagnostics::emit_elapsed(
+            crate::resident_diagnostics::Phase::DiagServeReady,
+            started.elapsed(),
+        );
+    }
     if published.unix_endpoint_identity != Some(ownership.identity) {
         drop(ownership);
         resident_state_retirement::retire_state(

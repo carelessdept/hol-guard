@@ -238,6 +238,18 @@ pub(crate) enum Phase {
     ContextRuntimeExecutableIdentity,
     ContextRuntimeLaunchIdentity,
     ContextRuntimeLaunchIdentityMatches,
+    DiagStartupDigest,
+    DiagOwnerLock,
+    DiagPolicyStore,
+    DiagRuleDigest,
+    DiagLoadAuthority,
+    DiagApprovalLoad,
+    DiagReplayMemory,
+    DiagAdmitSnapshot,
+    DiagToken,
+    DiagLiveness,
+    DiagPublishState,
+    DiagServeReady,
 }
 
 impl Phase {
@@ -268,6 +280,18 @@ impl Phase {
             Self::ContextRuntimeExecutableIdentity => "context_runtime_executable_identity",
             Self::ContextRuntimeLaunchIdentity => "context_runtime_launch_identity",
             Self::ContextRuntimeLaunchIdentityMatches => "context_runtime_launch_identity_matches",
+            Self::DiagStartupDigest => "diag_startup_digest",
+            Self::DiagOwnerLock => "diag_owner_lock",
+            Self::DiagPolicyStore => "diag_policy_store",
+            Self::DiagRuleDigest => "diag_rule_digest",
+            Self::DiagLoadAuthority => "diag_load_authority",
+            Self::DiagApprovalLoad => "diag_approval_load",
+            Self::DiagReplayMemory => "diag_replay_memory",
+            Self::DiagAdmitSnapshot => "diag_admit_snapshot",
+            Self::DiagToken => "diag_token",
+            Self::DiagLiveness => "diag_liveness",
+            Self::DiagPublishState => "diag_publish_state",
+            Self::DiagServeReady => "diag_serve_ready",
         }
     }
 }
@@ -367,6 +391,14 @@ pub(crate) fn observe<T, E>(
 pub(crate) fn start(phase: Phase) {
     if enabled() {
         emit(phase, Status::Start, Duration::ZERO);
+    }
+}
+
+pub(crate) static DIAG_SERVE_STARTED: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+
+pub(crate) fn emit_elapsed(phase: Phase, elapsed: Duration) {
+    if enabled() {
+        emit(phase, Status::Ok, elapsed);
     }
 }
 

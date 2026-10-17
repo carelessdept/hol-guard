@@ -225,21 +225,37 @@ impl PolicySnapshotStore {
         let authority_path = state_base.join(SNAPSHOT_FILE_NAME);
         recover_authority_replacement(&authority_path)?;
         let (expected_guard_home, expected_scope_digest) = scope_binding_for_state_base(state_base);
-        let expected_rule_digest = guard_rule_contract::rule_digest();
-        let loaded = load_current_authority(
-            &authority_path,
-            runtime_identity,
-            &expected_rule_digest,
-            &expected_scope_digest,
-            &verifier_key,
+        let expected_rule_digest = crate::resident_diagnostics::observe_value(
+            crate::resident_diagnostics::Phase::DiagRuleDigest,
+            guard_rule_contract::rule_digest,
+        );
+        let loaded = crate::resident_diagnostics::observe_value(
+            crate::resident_diagnostics::Phase::DiagLoadAuthority,
+            || {
+                load_current_authority(
+                    &authority_path,
+                    runtime_identity,
+                    &expected_rule_digest,
+                    &expected_scope_digest,
+                    &verifier_key,
+                )
+            },
         )?;
         if loaded.migrate {
             // Persist the recovered floor and its authenticated body before any
             // startup or idempotent ACK can rely on them. Failure keeps us closed.
             persist_loaded_authority(&authority_path, &loaded, &verifier_key)?;
         }
-        let approval_authority = approval_authority::load(state_base)?;
-        let approval_v4_authority = approval_v4_authority::load(state_base)?;
+        let (approval_authority, approval_v4_authority) =
+            crate::resident_diagnostics::observe_value(
+                crate::resident_diagnostics::Phase::DiagApprovalLoad,
+                || -> Result<_, String> {
+                    Ok((
+                        approval_authority::load(state_base)?,
+                        approval_v4_authority::load(state_base)?,
+                    ))
+                },
+            )?;
         let approval_authority_observed = Arc::new(Mutex::new(
             approval_authority
                 .as_ref()
@@ -260,7 +276,10 @@ impl PolicySnapshotStore {
                     )
                 }),
         ));
-        let approval_replay_memory = crate::approval::ApprovalReplayMemory::new()?;
+        let approval_replay_memory = crate::resident_diagnostics::observe_value(
+            crate::resident_diagnostics::Phase::DiagReplayMemory,
+            crate::approval::ApprovalReplayMemory::new,
+        )?;
         let authority_observed = Arc::new(Mutex::new(authority_fingerprint(&authority_path)));
         let authority_changed = Arc::new(AtomicBool::new(false));
         start_authority_watcher(
@@ -278,13 +297,16 @@ impl PolicySnapshotStore {
             Arc::clone(&approval_v4_authority_observed),
             Arc::downgrade(&authority_changed),
         );
-        let (admitted_snapshot, admission_failed) = match loaded.snapshot.as_ref() {
-            Some(snapshot) => match AdmittedPolicySnapshot::new(snapshot.clone()) {
-                Ok(snapshot) => (Some(Arc::new(snapshot)), false),
-                Err(_) => (None, true),
+        let (admitted_snapshot, admission_failed) = crate::resident_diagnostics::observe_value(
+            crate::resident_diagnostics::Phase::DiagAdmitSnapshot,
+            || match loaded.snapshot.as_ref() {
+                Some(snapshot) => match AdmittedPolicySnapshot::new(snapshot.clone()) {
+                    Ok(snapshot) => (Some(Arc::new(snapshot)), false),
+                    Err(_) => (None, true),
+                },
+                None => (None, false),
             },
-            None => (None, false),
-        };
+        );
         Ok(Self {
             state_base: state_base.to_owned(),
             authority_path,

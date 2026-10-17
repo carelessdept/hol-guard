@@ -208,12 +208,17 @@ pub(crate) fn serve_managed(
 ) -> Result<(), String> {
     MANAGED_SHUTDOWN_REQUESTED.store(false, Ordering::Release);
     let startup_started = crate::resident_diagnostics::enabled().then(Instant::now);
+    let diag_started = Instant::now();
+    let _ = crate::resident_diagnostics::DIAG_SERVE_STARTED.set(diag_started);
     if generation == 0 || owner_process_id == 0 || runtime_digest()? != expected_digest {
         return Err("native_resident_runtime_identity_mismatch".to_owned());
     }
+    let diag_digest = diag_started.elapsed();
     let owner_start_marker = process_start_marker(owner_process_id)?;
     let scope = state_scope(state_base, expected_digest)?;
+    let diag_lock_started = Instant::now();
     let owner_lock = acquire_managed_owner_lock(state_base)?;
+    let diag_lock = diag_lock_started.elapsed();
     // Build the immutable catalog read snapshot off the request path so the
     // first catalog_read does not pay for it; failures surface on that read.
     thread::spawn(|| {
@@ -223,21 +228,40 @@ pub(crate) fn serve_managed(
     // resident still starting. This guard drops before owner_lock on all exits.
     let _diagnostic_lifetime =
         crate::resident_diagnostics::install_managed_sink(state_base, &owner_lock);
+    crate::resident_diagnostics::emit_elapsed(
+        crate::resident_diagnostics::Phase::DiagStartupDigest,
+        diag_digest,
+    );
+    crate::resident_diagnostics::emit_elapsed(
+        crate::resident_diagnostics::Phase::DiagOwnerLock,
+        diag_lock,
+    );
     crate::resident_diagnostics::start(crate::resident_diagnostics::Phase::ResidentStartup);
     let startup = (|| -> Result<_, String> {
-        let policy_store = std::sync::Arc::new(
-            crate::policy_store::PolicySnapshotStore::new_with_resident_generation(
-                state_base,
-                expected_digest,
-                generation,
-            )?,
-        );
-        let token = crate::read_resident_auth_token()?;
-        let owner_alive = combine_liveness(
-            state_base,
-            owner_process_id,
-            owner_start_marker,
-            expected_digest,
+        let policy_store = std::sync::Arc::new(crate::resident_diagnostics::observe_value(
+            crate::resident_diagnostics::Phase::DiagPolicyStore,
+            || {
+                crate::policy_store::PolicySnapshotStore::new_with_resident_generation(
+                    state_base,
+                    expected_digest,
+                    generation,
+                )
+            },
+        )?);
+        let token = crate::resident_diagnostics::observe_value(
+            crate::resident_diagnostics::Phase::DiagToken,
+            crate::read_resident_auth_token,
+        )?;
+        let owner_alive = crate::resident_diagnostics::observe_value(
+            crate::resident_diagnostics::Phase::DiagLiveness,
+            || {
+                combine_liveness(
+                    state_base,
+                    owner_process_id,
+                    owner_start_marker,
+                    expected_digest,
+                )
+            },
         );
         Ok((policy_store, token, owner_alive))
     })();
