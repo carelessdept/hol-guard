@@ -15,9 +15,14 @@ use crate::approval_queue_identity_op::normalize_command_identity;
 /// The reason code an agent and the Inbox see for a connector setup review.
 pub(crate) const CONNECTOR_SETUP_REQUIRED: &str = "connector_setup_required";
 
-/// Review reason codes that mean only "Guard does not recognise this command".
-/// Any other code carries a risk signal and keeps its per-action review.
-pub(crate) const NON_RECOGNITION_REASON_CODES: [&str; 1] = ["native_command_review_required"];
+/// Review reason codes that mean only "Guard does not recognise this command":
+/// the generic review, and that same review when the workspace sandbox could
+/// not run the program. Any other code carries a risk signal and keeps its
+/// per-action review.
+pub(crate) const NON_RECOGNITION_REASON_CODES: [&str; 2] = [
+    "native_command_review_required",
+    "native_workspace_containment_executable_outside_roots",
+];
 
 /// Hex digits of the action digest in a connector group id.
 const ACTION_DIGEST_HEX: usize = 16;
@@ -74,7 +79,11 @@ mod tests {
     #[test]
     fn only_the_generic_review_is_non_recognition() {
         assert!(is_non_recognition(Some("native_command_review_required")));
+        assert!(is_non_recognition(Some(
+            "native_workspace_containment_executable_outside_roots"
+        )));
         for code in [
+            "native_workspace_containment_required",
             "native_network_review",
             "native_package_review",
             "native_sensitive_access_review",
