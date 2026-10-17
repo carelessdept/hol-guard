@@ -36,7 +36,7 @@ from .hook_native_saved_approval import (
 )
 from .hook_request_parsing import pre_tool_command, pre_tool_input
 from .native_review_allow_hint import native_review_extension_allow_hint
-from .native_review_connector import connector_agent_reason, native_review_setup_connector
+from .native_review_connector import connector_agent_reason, native_review_setup_connector, raise_connector_setup_notice
 from .native_review_records import native_review_approval_center_url, record_silent_native_review_event
 
 if TYPE_CHECKING:
@@ -225,10 +225,9 @@ def pause_native_pre_tool_for_approval(
             retry_reuses_approval=identity is not None,
             exact_action_allowable=exact_token is not None,
         )
-        # Approving a row that is neither bound to the retry nor eligible
-        # for an exact-action Always cannot let the agent run the action,
-        # so the reason does not send the user to approve it. A setup review
-        # also never links in the default mode.
+        # A row neither bound to the retry nor eligible for an exact-action Always
+        # cannot let the agent run the action, so the reason does not send the user
+        # to approve it. A setup review also never links in the default mode.
         approval_can_unblock = (identity is not None or exact_token is not None) and (ask or setup_reason is None)
         raw_url = queued.get("approval_url") if queued is not None and approval_can_unblock else None
         if isinstance(raw_url, str) and raw_url.strip():
@@ -389,6 +388,7 @@ def queue_native_pre_tool_review(
         stored = lookup(persisted_id)
     except (OSError, RuntimeError, TypeError, ValueError, sqlite3.Error):
         return None
+    raise_connector_setup_notice(store, stored, connector)
     return stored if isinstance(stored, dict) else None
 
 
