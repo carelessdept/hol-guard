@@ -67,6 +67,28 @@ def _clear_proof_overrides() -> None:
                 print(f"diag_pool_request elapsed_ms={elapsed:.1f}", file=sys.stderr, flush=True)
 
     _diag_client._PersistentNativeClientPool.request = _diag_request
+    from codex_plugin_scanner.guard import native_resident_stream as _diag_stream
+
+    _diag_client_original = _diag_stream._PersistentNativeClient.request
+
+    def _diag_client_request(self, payload, *, deadline_monotonic):
+        lines, lock = getattr(self, "_diagnostic_lines", None), getattr(self, "_diagnostic_lock", None)
+        if lines is not None and lock is not None:
+            with lock:
+                lines.clear()
+        started = time.perf_counter()
+        try:
+            return _diag_client_original(self, payload, deadline_monotonic=deadline_monotonic)
+        finally:
+            elapsed = (time.perf_counter() - started) * 1000
+            if elapsed > 100:
+                time.sleep(0.02)
+                tail = self._read_diagnostic_tail().decode("ascii", "replace")
+                print(f"diag_client_request elapsed_ms={elapsed:.1f} lines={len(tail.splitlines())}", file=sys.stderr, flush=True)
+                for line in tail.splitlines():
+                    print(f"diag_client {line}", file=sys.stderr, flush=True)
+
+    _diag_stream._PersistentNativeClient.request = _diag_client_request
 
 
 def _readiness_samples(

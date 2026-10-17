@@ -209,9 +209,10 @@ def _run_recovery(
                 file=sys.stderr,
                 flush=True,
             )
-            phase_log = session.guard_home / "native-runtime" / "managed-resident-phases.v1.log"
             try:
-                for line in phase_log.read_text(errors="replace").splitlines()[-40:]:
+                # A respawned resident truncates the log, so it holds only this generation.
+                _diag_log = session.guard_home / "native-runtime" / "managed-resident-phases.v1.log"
+                for line in _diag_log.read_text(errors="replace").splitlines()[:160]:
                     print(f"diag_phase sample={index} {line}", file=sys.stderr, flush=True)
             except OSError as error:
                 print(f"diag_phase sample={index} unavailable {type(error).__name__}", file=sys.stderr, flush=True)
