@@ -173,6 +173,7 @@ mod consumer_url;
 #[cfg(unix)]
 mod contained_op;
 #[cfg(unix)]
+mod contained_workspace_grant_plan;
 mod contained_workspace_sink;
 mod content_sensitivity_op;
 mod context_digest;
@@ -413,6 +414,7 @@ mod hook_process_spawn;
 mod hook_render_op;
 mod kimi_detect;
 mod local_cli_grant_op;
+mod local_cli_hook_contained;
 mod local_cli_hook_op;
 mod local_cli_identify;
 mod local_mcp_grant_identity;

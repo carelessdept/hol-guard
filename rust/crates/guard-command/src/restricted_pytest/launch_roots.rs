@@ -72,7 +72,7 @@ fn executable_roots(workspace: &Path, exec_roots: Vec<PathBuf>) -> Vec<PathBuf> 
 
 /// The file `program` names: a path relative to `cwd`, or a bare name on
 /// `search_path`. Names a shell would expand are not resolved.
-fn locate(program: &str, search_path: &str, cwd: &Path) -> Option<PathBuf> {
+pub(super) fn locate(program: &str, search_path: &str, cwd: &Path) -> Option<PathBuf> {
     if program.is_empty() || program.contains(['$', '~', '`', '*', '?', '[', '\\', '\n']) {
         return None;
     }
@@ -85,7 +85,7 @@ fn locate(program: &str, search_path: &str, cwd: &Path) -> Option<PathBuf> {
 
 /// The program a `#!` line runs: its interpreter, or for `/usr/bin/env` the
 /// first operand that is not an option or an assignment.
-fn interpreter(script: &Path) -> Option<String> {
+pub(super) fn interpreter(script: &Path) -> Option<String> {
     let mut head = [0_u8; SHEBANG_BYTES];
     let read = std::fs::File::open(script).ok()?.read(&mut head).ok()?;
     let line = head[..read].strip_prefix(b"#!")?;

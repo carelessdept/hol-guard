@@ -25,12 +25,12 @@ use serde_json::{json, Map, Value};
 use crate::context_digest_local_cli::python_path_name;
 use crate::context_digest_package_scripts::package_json_scripts;
 use crate::hook_direct::local_cli::block::{match_command_id, valid_package, valid_unlisted};
+use crate::local_cli_hook_contained::{self as contained, Refined};
 use crate::local_cli_identify::{identify, Request};
 use crate::local_store_read;
 use crate::native_exact_action_op::runner_bin::runner_split;
 
 const IDENTIFY_BUDGET_MS: u64 = 2_000;
-const REFINABLE_ACTIONS: [&str; 4] = ["allow", "review", "require-reapproval", "warn"];
 const ROOT_COMMAND_ID: &str = "root";
 const OTHER_COMMAND_ID: &str = "other";
 /// `MAX_LOCAL_CLI_COMMANDS`: the merged catalog, root and other included.
@@ -59,11 +59,14 @@ pub(crate) fn evaluate_local_cli_hook_request(
     if request.schema != LOCAL_CLI_HOOK_REQUEST_SCHEMA {
         return Err("native_local_cli_hook_schema_mismatch".to_owned());
     }
-    let (status, code, payload) = match run_with_connector(request) {
-        Ok((action, connector)) => {
-            let mut payload = json!({ "action": action });
-            if let Some(connector) = connector {
+    let (status, code, payload) = match run_refined(request) {
+        Ok(refined) => {
+            let mut payload = json!({ "action": refined.action });
+            if let Some(connector) = refined.connector {
                 payload["connector"] = connector;
+            }
+            if let Some(grant) = refined.contained_grant {
+                payload["contained_grant"] = grant;
             }
             ("ok".to_owned(), "ok".to_owned(), Some(payload))
         }
@@ -91,58 +94,55 @@ fn request_digest(request: &LocalCliHookRequestV1) -> Result<String, String> {
     ))
 }
 
+#[cfg(test)]
 pub(crate) fn run(request: &LocalCliHookRequestV1) -> Result<String, &'static str> {
     run_with_connector(request).map(|(action, _)| action)
 }
 
 /// The refined action, and the connector a `review` waits on when this device
 /// has no allow or block decision for the CLI the command launches.
+#[cfg(test)]
 pub(crate) fn run_with_connector(
     request: &LocalCliHookRequestV1,
 ) -> Result<(String, Option<Value>), &'static str> {
+    run_refined(request).map(|refined| (refined.action, refined.connector))
+}
+
+/// Record the launch, then refine the action with this device's grant.
+pub(crate) fn run_refined(request: &LocalCliHookRequestV1) -> Result<Refined, &'static str> {
+    let package = checked_package(request)?;
+    observe(request, &package)?;
+    Ok(refined(request, &package))
+}
+
+/// The grant refinement alone, recording nothing: what the workspace sink
+/// asks again right before it widens a sandbox by a grant.
+pub(crate) fn decide_refined(request: &LocalCliHookRequestV1) -> Result<Refined, &'static str> {
+    let package = checked_package(request)?;
+    Ok(refined(request, &package))
+}
+
+fn checked_package(request: &LocalCliHookRequestV1) -> Result<Package, &'static str> {
     local_store_read::require_store_path(&request.store_path, &request.guard_home)
         .map_err(|_| "native_local_cli_hook_path_invalid")?;
     let package_home = request.home_dir.as_deref().unwrap_or(&request.cwd);
-    let package = match package_json_scripts(&request.command, &request.cwd, package_home) {
-        Ok(Some(found)) if !valid_package(&found) => Err(()),
-        found => found.map_err(|_| ()),
-    };
-    observe(request, &package)?;
-    let current = request.current_action.as_str();
-    if !request.grant_allowed || !REFINABLE_ACTIONS.contains(&current) {
-        return Ok((current.to_owned(), None));
-    }
-    let (action, connector) = match grant(request, &package) {
-        Ok((Some("allowed"), _)) => ("allow", None),
-        Ok((Some("blocked"), _)) => ("block", None),
-        Ok((_, launch)) => (current, launch.filter(|_| current == "review")),
-        Err(()) => (unverified_action(request), None),
-    };
-    let connector = match connector {
-        Some(launch) => setup_connector(request, &launch),
-        None => None,
-    };
-    Ok((action.to_owned(), connector))
+    Ok(
+        match package_json_scripts(&request.command, &request.cwd, package_home) {
+            Ok(Some(found)) if !valid_package(&found) => Err(()),
+            found => found.map_err(|_| ()),
+        },
+    )
 }
 
-/// The connector payload when this device has never decided on `launch`; a
-/// store that cannot answer leaves the review as it was.
-fn setup_connector(request: &LocalCliHookRequestV1, launch: &Launch) -> Option<Value> {
-    crate::local_cli_grant_op::grant_unset(
-        &request.guard_home,
-        &launch.cli_id,
-        &launch.identity_hash,
-    )
-    .ok()
-    .filter(|unset| *unset)
-    .map(|_| {
-        crate::connector_setup::payload(
-            &launch.cli_id,
-            &launch.identity_hash,
-            &launch.name,
-            &launch.kind,
-            &request.command,
-        )
+fn refined(request: &LocalCliHookRequestV1, package: &Package) -> Refined {
+    if !contained::refinable(request) {
+        return Refined {
+            action: request.current_action.clone(),
+            ..Refined::default()
+        };
+    }
+    contained::refine(request, grant(request, package), || {
+        contained::unverified_action(request).to_owned()
     })
 }
 
@@ -328,15 +328,13 @@ fn unlisted(request: &LocalCliHookRequestV1, compound: bool) -> Result<Vec<Unlis
     }
 }
 
-/// `matching_local_cli_grant`: the grant state for the launched CLI, `None`
-/// when it launches none, and `Err` when no trustworthy answer exists.
-fn grant(
-    request: &LocalCliHookRequestV1,
-    package: &Package,
-) -> Result<(Option<&'static str>, Option<Launch>), ()> {
+/// `matching_local_cli_grant`: the grant state for the launched CLI (`None`
+/// when undecided or when it launches none), the CLI, and the decision's
+/// capabilities; `Err` when no trustworthy answer exists.
+fn grant(request: &LocalCliHookRequestV1, package: &Package) -> contained::Answer {
     let package = package.as_ref().map_err(|_| ())?;
     let Some(launch) = launch(request, package.as_ref())? else {
-        return Ok((None, None));
+        return Ok((None, None, Value::Null));
     };
     let (catalog, _) =
         crate::local_cli_grant_op::command_catalog(&request.guard_home, &launch.cli_id)
@@ -361,12 +359,13 @@ fn grant(
     {
         return Err(());
     }
-    match answer["state"].as_str() {
-        Some("allowed") => Ok((Some("allowed"), None)),
-        Some("blocked") => Ok((Some("blocked"), None)),
-        Some("none") => Ok((None, Some(launch))),
-        _ => Err(()),
-    }
+    let state = match answer["state"].as_str() {
+        Some("allowed") => Some("allowed"),
+        Some("blocked") => Some("blocked"),
+        Some("none") => None,
+        _ => return Err(()),
+    };
+    Ok((state, Some(launch), answer["capabilities"].clone()))
 }
 
 /// The package script identity, else the first CLI one safe invocation
@@ -457,52 +456,6 @@ fn is_command_name(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
 }
 
-/// `unverified_local_cli_action`: hold an otherwise allowed command for
-/// review while a block rule might apply.
-fn unverified_action(request: &LocalCliHookRequestV1) -> &str {
-    let current = request.current_action.as_str();
-    if !matches!(current, "allow" | "warn") {
-        return current;
-    }
-    if has_block_rules(request) {
-        "review"
-    } else {
-        current
-    }
-}
-
-/// `has_local_cli_block_rules`; an unreadable store counts as having one.
-pub(crate) fn has_block_rules(request: &LocalCliHookRequestV1) -> bool {
-    let Ok(path) = local_store_read::require_store_path(&request.store_path, &request.guard_home)
-    else {
-        return true;
-    };
-    let connection = match local_store_read::open_read_only(&path) {
-        Ok(Some(connection)) => connection,
-        Ok(None) => return false,
-        Err(_) => return true,
-    };
-    for (table, state) in [
-        ("local_cli_grant", "blocked"),
-        ("local_cli_command_grant", "block"),
-    ] {
-        match local_store_read::table_exists(&connection, table) {
-            Ok(false) => continue,
-            Ok(true) => {}
-            Err(_) => return true,
-        }
-        let found = connection.query_row(
-            &format!("select exists(select 1 from {table} where state = ?1)"),
-            [state],
-            |row| row.get::<_, bool>(0),
-        );
-        if found.unwrap_or(true) {
-            return true;
-        }
-    }
-    false
-}
-
 #[cfg(test)]
 #[path = "local_cli_hook_op_tests.rs"]
-mod tests;
+pub(crate) mod tests;
