@@ -67,6 +67,8 @@ def _clear_proof_overrides() -> None:
                 print(f"diag_pool_request elapsed_ms={elapsed:.1f}", file=sys.stderr, flush=True)
 
     _diag_client._PersistentNativeClientPool.request = _diag_request
+    import re
+
     from codex_plugin_scanner.guard import native_resident_stream as _diag_stream
 
     _diag_client_original = _diag_stream._PersistentNativeClient.request
@@ -84,7 +86,13 @@ def _clear_proof_overrides() -> None:
             if elapsed > 100:
                 time.sleep(0.02)
                 tail = self._read_diagnostic_tail().decode("ascii", "replace")
-                print(f"diag_client_request elapsed_ms={elapsed:.1f} lines={len(tail.splitlines())}", file=sys.stderr, flush=True)
+                match = re.search(rb'"operation"\s*:\s*"([a-z_]{1,64})"', payload[:4096])
+                operation = match.group(1).decode() if match else "unknown"
+                print(
+                    f"diag_client_request elapsed_ms={elapsed:.1f} op={operation} lines={len(tail.splitlines())}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 for line in tail.splitlines():
                     print(f"diag_client {line}", file=sys.stderr, flush=True)
 
