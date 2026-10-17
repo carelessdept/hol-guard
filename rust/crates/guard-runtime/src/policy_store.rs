@@ -300,7 +300,15 @@ impl PolicySnapshotStore {
         let (admitted_snapshot, admission_failed) = crate::resident_diagnostics::observe_value(
             crate::resident_diagnostics::Phase::DiagAdmitSnapshot,
             || match loaded.snapshot.as_ref() {
-                Some(snapshot) => match AdmittedPolicySnapshot::new(snapshot.clone()) {
+                Some(snapshot) => match AdmittedPolicySnapshot::new({
+                    let started = std::time::Instant::now();
+                    let cloned = snapshot.clone();
+                    crate::resident_diagnostics::emit_elapsed(
+                        crate::resident_diagnostics::Phase::DiagSnapshotClone,
+                        started.elapsed(),
+                    );
+                    cloned
+                }) {
                     Ok(snapshot) => (Some(Arc::new(snapshot)), false),
                     Err(_) => (None, true),
                 },

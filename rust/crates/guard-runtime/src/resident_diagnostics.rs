@@ -250,6 +250,12 @@ pub(crate) enum Phase {
     DiagLiveness,
     DiagPublishState,
     DiagServeReady,
+    DiagSnapshotClone,
+    DiagProgramDecode,
+    DiagProgramParse,
+    DiagCompileEffective,
+    DiagCompileBusiness,
+    DiagCompileCommand,
 }
 
 impl Phase {
@@ -292,6 +298,12 @@ impl Phase {
             Self::DiagLiveness => "diag_liveness",
             Self::DiagPublishState => "diag_publish_state",
             Self::DiagServeReady => "diag_serve_ready",
+            Self::DiagSnapshotClone => "diag_snapshot_clone",
+            Self::DiagProgramDecode => "diag_program_decode",
+            Self::DiagProgramParse => "diag_program_parse",
+            Self::DiagCompileEffective => "diag_compile_effective",
+            Self::DiagCompileBusiness => "diag_compile_business",
+            Self::DiagCompileCommand => "diag_compile_command",
         }
     }
 }
