@@ -95,3 +95,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "connector_setup_render_tests.rs"]
+mod render_tests;
