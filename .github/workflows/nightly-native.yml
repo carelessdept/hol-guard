@@ -970,7 +970,7 @@ jobs:
             --runtime "$runtime" \
             --warm-iterations 2 \
             --cold-iterations 2 \
-            --recovery-iterations 2 \
+            --recovery-iterations 6 \
             --readiness-samples 2 \
             --json native-installed-slo.json \
             --enforce
@@ -1356,7 +1356,7 @@ jobs:
               --runtime "$runtime" \
               --warm-iterations 2 \
               --cold-iterations 2 \
-              --recovery-iterations 2 \
+              --recovery-iterations 6 \
               --readiness-samples 2 \
               --json "$output_path" \
               --enforce 2>"${output_path}.stderr" || status=$?

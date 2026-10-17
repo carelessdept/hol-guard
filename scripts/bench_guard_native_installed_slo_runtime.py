@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import time
+
+import os
+
 import platform
 import re
 import sys
@@ -47,6 +51,22 @@ def _clear_proof_overrides() -> None:
 
     _ = clear_proof_environment()
     _require(not proof_environment_violations(), "native/test override remained in proof environment")
+    # Bisect-only diagnostics: record resident phases and Rust client pool timings.
+    os.environ["HOL_GUARD_NATIVE_DIAGNOSTIC"] = "1"
+    from codex_plugin_scanner.guard import native_resident_client as _diag_client
+
+    _diag_original_request = _diag_client._PersistentNativeClientPool.request
+
+    def _diag_request(self, payload, *, deadline_monotonic):
+        started = time.perf_counter()
+        try:
+            return _diag_original_request(self, payload, deadline_monotonic=deadline_monotonic)
+        finally:
+            elapsed = (time.perf_counter() - started) * 1000
+            if elapsed > 100:
+                print(f"diag_pool_request elapsed_ms={elapsed:.1f}", file=sys.stderr, flush=True)
+
+    _diag_client._PersistentNativeClientPool.request = _diag_request
 
 
 def _readiness_samples(
